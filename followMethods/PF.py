@@ -1,34 +1,8 @@
 # python3 practica.py --input_path="./SecuenciaPelota/" --filter="cf" --use_vel="true" --use_accel=true --particle_sel='nr'
-# refs: https://colab.research.google.com/github/vaipatel/udacity_robond_2020/blob/master/Monte_Carlo_Localization.ipynb/
-from natsort import natsorted
 import numpy as np
 import matplotlib.pyplot as plt
-import cv2
-import os
-import argparse
 
-np.random.seed(0);
-
-# argparse no devuelve booleanos
-def str2bool(v):
-  if isinstance(v, bool):
-      return v
-  if v.lower() in ('yes', 'true', 'True', 't', '1'):
-      return True
-  elif v.lower() in ('no', 'false', 'False', 'f', '0'):
-      return False
-  else:
-      raise argparse.ArgumentTypeError('Boolean value expected.')
-
-def get_args():
-  parser = argparse.ArgumentParser(description="")
-  parser.add_argument('--input_path', type=str, required=True, help='input dir')
-  parser.add_argument('--filter', type=str, required=True, help='color filter (cf) or background_subtraction_average (bs)')
-  parser.add_argument('--use_vel', type=str2bool, required=True, help='')
-  parser.add_argument('--use_accel', type=str2bool, required=True, help='')
-  parser.add_argument('--particle_sel', type=str, required=True, help='particle selection method: or normal rolette(nr) or low-variance roulette (pr)')
-
-  return parser.parse_args()
+np.random.seed(0)
 
 class Particle:
   def __init__(self, roi_size, img, parent_particle=None):
@@ -228,78 +202,3 @@ class PF:
         ax[i,j].invert_yaxis() # como calculamos con opencv pero graficamos con matlab hay que invertir el eje y de la representación
     fig.tight_layout()
     plt.show()
-
-
-def apply_red_filter(image):
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-
-    lower_red1 = np.array([0, 120, 70])
-    upper_red1 = np.array([10, 255, 255])
-    lower_red2 = np.array([170, 120, 70])
-    upper_red2 = np.array([180, 255, 255])
-
-    mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
-    mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
-
-    mask = mask1 + mask2
-
-    return mask
-
-def background_subtraction_mean(imgs, threshold_value=20):
-  gray_imgs = np.array([cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) for img in imgs])
-  # las 6 primeras imagenes no tienen mucha parte de la pelota, si uso todas la img media tiene una pelota en el centro.
-  avg_background = np.mean(gray_imgs[:6], axis=0).astype(np.uint8)
-  result = []
-  
-  for gray_img in gray_imgs:
-    diff = cv2.absdiff(gray_img, avg_background)
-    _, thresholded = cv2.threshold(diff, threshold_value, 255, cv2.THRESH_BINARY)
-    result.append(thresholded)
-  
-  return result
-
-# Dado un path donde se encuentran las imágenes, devuelve una lista de paths de imagenes ordenadas.
-def sort_imgs_path(path):
-  imgs_name = os.listdir(path)
-  imgs_name = natsorted(imgs_name) # python sorts strings= [1 3 10 2] as [1 10 2 3] by default so I need natsorted
-  imgs_sorted = [os.path.join(path, img) for img in imgs_name]
-  return imgs_sorted
-
-if __name__ == "__main__":
-  args = get_args()
-  sorted_paths = sort_imgs_path(args.input_path)
-
-  readed_imgs = []
-
-  for img_path in sorted_paths:
-    image = cv2.imread(img_path)
-    resized_image = cv2.resize(image, (240, 240))
-    readed_imgs.append(resized_image)
-
-  processed_imgs = []
-
-  if args.filter == "bs":
-    processed_imgs = background_subtraction_mean(readed_imgs, threshold_value=40)
-  elif args.filter == "cf":
-    for img in readed_imgs:
-      processed_imgs.append(apply_red_filter(img))
-  else:
-      raise SystemExit('Filters available: cf or bs')
-  
-  if (args.particle_sel != 'nr' and args.particle_sel != 'pr'):
-    raise argparse.ArgumentTypeError('only normal_roulette(nr) or pondered_roulette_(pr) available')
-
-  # Particle Filter variables
-  num_particles = 100
-  particle_roi_size = 16
-
-  # Plotting variables
-  mcl_steps = len(processed_imgs)
-  n_plot_cols = 10
-  n_plot_rows = int(np.ceil(mcl_steps/n_plot_cols)) # Solo puedo usar un int para el numero de filas.
-
-  mcl = PF(particle_roi_size, processed_imgs[20], n_particles=num_particles, video=processed_imgs, use_vel=args.use_vel, use_accel=args.use_accel, resample=args.particle_sel)
-
-  mcl.run(steps=mcl_steps)
-
-  mcl.plot_results(mcl_steps, n_plot_cols, n_plot_rows)

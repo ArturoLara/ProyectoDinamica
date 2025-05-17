@@ -1,6 +1,6 @@
 import numpy as np
 
-class KalmanFilterStraight:
+class Kalman:
     def __init__(self, dt, num_itr, parm_RW, parm_OB):
         self.dt = dt
         self.num_itr = num_itr

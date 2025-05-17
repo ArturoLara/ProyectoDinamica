@@ -1,4 +1,4 @@
-from Kalman import  KF_straight
+from followMethods import Kalman
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -21,7 +21,7 @@ parm_OB = {
     'sigma_range': 1.0
 }
 
-kf =  KF_straight.KalmanFilterStraight(dt, num_itr, parm_RW, parm_OB)
+kf =  Kalman(dt, num_itr, parm_RW, parm_OB)
 mu, cov, z_bar, inn, z, x_real = kf.run()
 
 # Visualización
