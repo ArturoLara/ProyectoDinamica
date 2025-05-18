@@ -4,8 +4,8 @@ import scipy.stats
 
 def background_subtraction_mean(imgs, threshold_value=20):
     gray_imgs = np.array([cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) for img in imgs])
-    # las 6 primeras imagenes no tienen mucha parte de la pelota, si uso todas la img media tiene una pelota en el centro.
-    avg_background = np.mean(gray_imgs[:6], axis=0).astype(np.uint8)
+
+    avg_background = np.mean(gray_imgs, axis=0).astype(np.uint8)
     result = []
 
     for gray_img in gray_imgs:
@@ -45,7 +45,7 @@ def background_subtraction_exponential_moving_average_consider_bg(imgs, alpha=0.
     background = gray_imgs[0]
     result = []
     
-    for gray_img in gray_img[1:]:
+    for gray_img in gray_imgs[1:]:
         diff = cv2.absdiff(gray_img, background)
         _, thresholded = cv2.threshold(diff, threshold_value, 255, cv2.THRESH_BINARY)
         result.append(thresholded)
@@ -61,7 +61,7 @@ def background_subtraction_gaussian_moving_average(imgs, alpha=0.5, k=2.5, thres
     variance = np.ones_like(mean, dtype=np.float32) * 50  # Inicialización de la varianza
     result = []
     
-    for gray_img in gray_img[1:]:
+    for gray_img in gray_imgs[1:]:
         # Actualización de la media
         mean = alpha * gray_img + (1 - alpha) * mean
         
