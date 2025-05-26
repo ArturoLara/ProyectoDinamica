@@ -146,31 +146,57 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
     return result, trayectorias
 
 
-def graficar_resultados(trayectorias, output):
+def graficar_resultados(trayectorias, output_base):
+    # Función auxiliar para guardar en dos archivos
+    def guardar_grafica(x_data, y_data, titulo, eje_y, output):
+        plt.figure(figsize=(15, 8))
+        time = range(len(x_data['mediciones']))
 
-    plt.figure(figsize=(15, 8))
+        # Mediciones (puntos rojos solo donde hay datos)
+        med_valid = [(t, x) for t, x in enumerate(x_data['mediciones']) if not np.isnan(x)]
+        if med_valid:
+            t_med, x_med = zip(*med_valid)
+            plt.plot(t_med, x_med, 'ro', label='Mediciones', markersize=4)
 
-    # Extraer coordenadas
-    med_x = [m[0] for m in trayectorias['mediciones'] if not np.isnan(m[0])]
-    med_y = [m[1] for m in trayectorias['mediciones'] if not np.isnan(m[1])]
+        # Kalman (línea continua)
+        plt.plot(time, x_data['kalman'], 'g-', linewidth=2, label='Filtro de Kalman')
 
-    kalman_x = [k[0] for k in trayectorias['kalman']]
-    kalman_y = [k[1] for k in trayectorias['kalman']]
+        # Partículas (línea discontinua)
+        plt.plot(time, x_data['particulas'], 'm--', linewidth=2, label='Filtro de Partículas')
 
-    pf_x = [p[0] for p in trayectorias['particulas']]
-    pf_y = [p[1] for p in trayectorias['particulas']]
+        plt.title(titulo)
+        plt.xlabel('Tiempo (frames)')
+        plt.ylabel(eje_y)
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(output)
+        plt.close()
 
-    # Graficar trayectorias
-    plt.plot(med_x, med_y, 'ro', label='Mediciones', markersize=4)
-    plt.plot(kalman_x, kalman_y, 'g-', linewidth=2, label='Filtro de Kalman')
-    plt.plot(pf_x, pf_y, 'm--', linewidth=2, label='Filtro de Partículas')
+    # Preparar datos para eje X
+    datos_x = {
+        'mediciones': [m[0] if not np.isnan(m[0]) else np.nan for m in trayectorias['mediciones']],
+        'kalman': [k[0] for k in trayectorias['kalman']],
+        'particulas': [p[0] for p in trayectorias['particulas']]
+    }
 
-    plt.title('Comparativa de Trayectorias')
-    plt.xlabel('X (pixels)')
-    plt.ylabel('Y (pixels)')
-    plt.legend()
-    plt.grid(True)
-    plt.savefig(output)
+    # Preparar datos para eje Y
+    datos_y = {
+        'mediciones': [m[1] if not np.isnan(m[1]) else np.nan for m in trayectorias['mediciones']],
+        'kalman': [k[1] for k in trayectorias['kalman']],
+        'particulas': [p[1] for p in trayectorias['particulas']]
+    }
+
+    # Generar y guardar gráficas
+    guardar_grafica(datos_x, datos_y,
+                    'Evolución Temporal de la Coordenada X',
+                    'X (pixels)',
+                    f"{output_base}_x.png")
+
+    guardar_grafica(datos_y, datos_x,  # Intercambiamos datos para el eje Y
+                    'Evolución Temporal de la Coordenada Y',
+                    'Y (pixels)',
+                    f"{output_base}_y.png")
+
 
 def extraer_frames(video_path, reduce_dim=4, reduce_fps=3, n_frames=20*30):
     # reduce fps takes one frame per $(reduce_fps)
@@ -226,17 +252,19 @@ if __name__ == "__main__":
                                              resample='pr', particulas=400)
 
     guardar_video(result, path_output + "_groundTruth.mp4", fps=60)
-    graficar_resultados(trayectorias, path_output + "_groundTruth.png")
+    graficar_resultados(trayectorias, path_output + "_groundTruth")
 
     # Uso de background subtraction por media
     frames = background_subtraction_mean(video)
+    guardar_video(frames, "BS_" + path_output + "_Mean.mp4", fps=60)
     result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
                                              use_vel=True, use_accel=False,
                                              resample='pr', particulas=100)
 
-    guardar_video(result, path_output + "_Mean.mp4", fps=60)
-    graficar_resultados(trayectorias, path_output + "_Mean.png")
+    guardar_video(frames, path_output + "_Mean.mp4", fps=60)
+    graficar_resultados(trayectorias, path_output + "_Mean")
 
+<<<<<<< HEAD
     # # Uso de background subtraction por moda
     # frames = background_subtraction_mode(video)
     # result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
@@ -273,3 +301,45 @@ if __name__ == "__main__":
     # guardar_video(result, path_output + "_Gauss.mp4", fps=60)
     # graficar_resultados(trayectorias, path_output + "_Gauss.png")
     
+=======
+    # Uso de background subtraction por moda
+    frames = background_subtraction_mode(video)
+    guardar_video(frames, "BS_" + path_output + "_Mode.mp4", fps=60)
+    result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
+                                             use_vel=True, use_accel=False,
+                                             resample='pr', particulas=100)
+
+    guardar_video(result, path_output + "_Mode.mp4", fps=60)
+    graficar_resultados(trayectorias, path_output + "_Mode")
+
+    # Uso de background subtraction por moda
+    frames = background_subtraction_exponential_moving_average(video)
+    guardar_video(frames, "BS_" + path_output + "_Mean.mp4", fps=60)
+    result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
+                                             use_vel=True, use_accel=False,
+                                             resample='pr', particulas=100)
+
+    guardar_video(result, path_output + "_AVGMove.mp4", fps=60)
+    graficar_resultados(trayectorias, path_output + "_AVGMove")
+    
+    # Uso de background subtraction por moda
+    frames = background_subtraction_exponential_moving_average_consider_bg(video)
+    guardar_video(frames, "BS_" + path_output + "_AVGMoveBG.mp4", fps=60)
+    result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
+                                             use_vel=True, use_accel=False,
+                                             resample='pr', particulas=100)
+
+    guardar_video(result, path_output + "_AVGMoveBG.mp4", fps=60)
+    graficar_resultados(trayectorias, path_output + "_AVGMoveBG")
+
+    # Uso de background subtraction por moda
+    frames = background_subtraction_gaussian_moving_average(video)
+    guardar_video(frames, "BS_" + path_output + "_Gauss.mp4", fps=60)
+    result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
+                                             use_vel=True, use_accel=False,
+                                             resample='pr', particulas=100)
+
+    guardar_video(result, path_output + "_Gauss.mp4", fps=60)
+    graficar_resultados(trayectorias, path_output + "_Gauss")
+
+>>>>>>> f08358e54a7abc2a7660226f83cce1d2c6442888
