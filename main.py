@@ -221,12 +221,12 @@ def procesar_secuencia(video, bs, gt, dt, use_vel, use_accel, resample, particul
                          (0, 0, 255), 1)
 
         # Leyenda mejorada
-        cv2.putText(img_color, "Medicion", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-        cv2.putText(img_color, "Kalman", (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-        cv2.putText(img_color, "Particulas", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
-        cv2.putText(img_color, "Enjambre", (10, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
-        cv2.putText(img_color, "Ground Truth", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-        cv2.putText(img_color, "Yolo", (10, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (125, 125, 0), 2)
+        cv2.putText(img_color, "Medicion", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 2)
+        cv2.putText(img_color, "Kalman", (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
+        cv2.putText(img_color, "Particulas", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 255), 2)
+        cv2.putText(img_color, "Enjambre", (10, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 0), 2)
+        cv2.putText(img_color, "Ground Truth", (10, 135), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 2)
+        cv2.putText(img_color, "Yolo", (10, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (125, 125, 0), 2)
 
 
         result.append(img_color)
@@ -253,13 +253,13 @@ def graficar_resultados(trayectorias, output_base):
             plt.plot(t_med, x_med, 'ro', label='Mediciones', markersize=4)
 
         # Kalman (línea continua)
-        plt.plot(time, x_data['kalman'], 'g--', linewidth=2, label='Filtro de Kalman')
+        plt.plot(time, x_data['kalman'], 'g-', linewidth=2, label='Filtro de Kalman')
 
         # Partículas (línea discontinua)
-        plt.plot(time, x_data['particulas'], 'm--', linewidth=2, label='Filtro de Partículas')
+        plt.plot(time, x_data['particulas'], 'm-', linewidth=2, label='Filtro de Partículas')
         # enjambre (línea discontinua)
-        plt.plot(time, x_data['enjambre'], 'b--', linewidth=2, label='Enjambre')
-        plt.plot(time, x_data['yolo'], 'y--', linewidth=2, label='Yolo')
+        plt.plot(time, x_data['enjambre'], 'b-', linewidth=2, label='Enjambre')
+        plt.plot(time, x_data['yolo'], 'c-', linewidth=2, label='Yolo')
 
 
         plt.title(titulo)
@@ -285,10 +285,27 @@ def graficar_resultados(trayectorias, output_base):
         'mediciones': [m[1] if not np.isnan(m[1]) else np.nan for m in trayectorias['mediciones']],
         'kalman': [k[1] for k in trayectorias['kalman']],
         'particulas': [p[1] for p in trayectorias['particulas']],
-        'enjambre': [p[0] for p in trayectorias['enjambre']],
+        'enjambre': [p[1] for p in trayectorias['enjambre']],
         'ground_truth': [gt[1] if not np.isnan(gt[1]) else np.nan for gt in trayectorias['ground_truth']],
         'yolo': [p[1] for p in trayectorias['yolo']]
     }
+
+    def error_medio(pred, gt):
+        errores = [abs(p - g) for p, g in zip(pred, gt) if not np.isnan(g)]
+        return sum(errores) / len(errores) if errores else float('nan')
+    
+    print("Errores medios respecto a GT (eje X):")
+    print("Kalman:", error_medio(datos_x['kalman'], datos_x['ground_truth']))
+    print("Partículas:", error_medio(datos_x['particulas'], datos_x['ground_truth']))
+    print("Enjambre:", error_medio(datos_x['enjambre'], datos_x['ground_truth']))
+    print("Yolo:", error_medio(datos_x['yolo'], datos_x['ground_truth']))
+    print("")
+    print("Errores medios respecto a GT (eje Y):")
+    print("Kalman:", error_medio(datos_y['kalman'], datos_y['ground_truth']))
+    print("Partículas:", error_medio(datos_y['particulas'], datos_y['ground_truth']))
+    print("Enjambre:", error_medio(datos_y['enjambre'], datos_y['ground_truth']))
+    print("Yolo:", error_medio(datos_y['yolo'], datos_y['ground_truth']))
+    print("--------------------------------------------------------------------------")
 
     # Generar y guardar gráficas
     guardar_grafica(datos_x,
@@ -349,6 +366,7 @@ if __name__ == "__main__":
     video = extraer_frames(path_video, reduce_dim=reduce_dim, reduce_fps=3, n_frames=20*30)
 
     # # Uso de background subtraction ground truth
+    print("usando bs proporcionada")
     frames_gt = extraer_frames(path_bs, reduce_dim=reduce_dim, reduce_fps=3, n_frames=20*30)
     frames_gt = [cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) for frame in frames_gt]
     result, trayectorias = procesar_secuencia(video, frames_gt, frames_gt, dt=0.1,
@@ -359,6 +377,7 @@ if __name__ == "__main__":
     graficar_resultados(trayectorias, path_output + "_groundTruth")
 
     # # Uso de background subtraction por media
+    print("usando media")
     frames = background_subtraction_mean(video)
     guardar_video(frames, "BS_" + path_output + "_Mean.mp4", fps=60)
     result, trayectorias = procesar_secuencia(video, frames, frames_gt, dt=0.1,
@@ -369,6 +388,7 @@ if __name__ == "__main__":
     graficar_resultados(trayectorias, path_output + "_Mean")
 
     # Uso de background subtraction por moda
+    print("usando exponential_moving_average")
     frames = background_subtraction_exponential_moving_average(video)
     result, trayectorias = procesar_secuencia(video, frames, frames_gt, dt=0.1,
                                              use_vel=True, use_accel=False,
@@ -378,6 +398,7 @@ if __name__ == "__main__":
     graficar_resultados(trayectorias, path_output + "_AVGMove.png")
     
     # # Uso de background subtraction por moda
+    print("usando exponential_moving_average_consider_bg")
     frames = background_subtraction_exponential_moving_average_consider_bg(video)
     result, trayectorias = procesar_secuencia(video, frames, frames_gt, dt=0.1,
                                              use_vel=True, use_accel=False,
@@ -387,6 +408,7 @@ if __name__ == "__main__":
     graficar_resultados(trayectorias, path_output + "_AVGMoveBG.png")
 
     # Uso de background subtraction por moda
+    print("usando gaussian_moving_average")
     frames = background_subtraction_gaussian_moving_average(video)
     result, trayectorias = procesar_secuencia(video, frames, frames_gt, dt=0.1,
                                              use_vel=True, use_accel=False,
