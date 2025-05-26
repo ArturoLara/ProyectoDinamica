@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 from followMethods import Kalman, PF, Swarm
 from subtractionMethods import *
-from ultralypip3tics import YOLO
+from ultralytics import YOLO
 
 
 def detectar_objeto(img_binaria):
