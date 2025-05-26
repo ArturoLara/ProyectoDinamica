@@ -2,14 +2,20 @@ import cv2
 import numpy as np
 import scipy.stats
 
-def background_subtraction_mean(imgs, threshold_value=20):
-    gray_imgs = np.array([cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) for img in imgs])
-
-    avg_background = np.mean(gray_imgs, axis=0).astype(np.uint8)
+def background_subtraction_mean(imgs, threshold_value=40, window_size=5):
+    gray_imgs = [cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) for img in imgs]
     result = []
 
-    for gray_img in gray_imgs:
-        diff = cv2.absdiff(gray_img, avg_background)
+    for i in range(len(gray_imgs)):
+        # Determina el inicio de la ventana, sin salirse del índice 0
+        start = max(0, i - window_size + 1)
+        stop = min(len(imgs), start + window_size)
+        # Toma las imágenes de la ventana
+        window = gray_imgs[start:stop]
+        # Calcula la media del fondo con las imágenes de la ventana
+        avg_background = np.mean(window, axis=0).astype(np.uint8)
+
+        diff = cv2.absdiff(gray_imgs[i], avg_background)
         _, thresholded = cv2.threshold(diff, threshold_value, 255, cv2.THRESH_BINARY)
         result.append(thresholded)
 

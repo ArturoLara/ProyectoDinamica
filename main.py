@@ -9,8 +9,8 @@ from subtractionMethods import *
 def detectar_objeto(img_binaria):
 
     contours, _ = cv2.findContours(img_binaria, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
     if not contours:
+        print("hola")
         return None
 
     c = max(contours, key=cv2.contourArea)
@@ -47,13 +47,16 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
     }
 
     last_position = None
+    good_contours = -1
 
     for idx, frame in enumerate(bs):
         # 1. Detección del objeto
         medicion = detectar_objeto(frame)
-
+        if medicion is None:
+            continue
+        good_contours+=1
         # 2. Actualizar Kalman
-        if idx == 0 and medicion is not None:
+        if good_contours == 0 and medicion is not None:
             kalman.state[:2] = medicion
             estimacion_kf = kalman.state[:2]
         else:
@@ -62,7 +65,7 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
                 kalman.update(medicion)
 
         # 3. Actualizar Particle Filter
-        if idx == 0:
+        if good_contours == 0:
             if medicion is not None:
                 last_position = medicion.copy()
             else:
@@ -74,6 +77,7 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
             estimacion_pf = pf.get_smoothed_estimate()
 
             # Actualización adaptativa del ROI
+            print(estimacion_pf, last_position)
             if np.linalg.norm(estimacion_pf - last_position) > 10:
                 pf.roi_size = min(60, pf.roi_size + 10)
             else:
@@ -109,23 +113,26 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
         cv2.circle(img_color, tuple(estimacion_pf.astype(int).tolist()), 5, (255, 0, 255), -1) # Partículas (magenta)
 
         # Dibujar trayectorias
-        if idx > 0:
+        if good_contours > 0:
             # Kalman
             cv2.line(img_color,
-                     tuple(trayectorias['kalman'][idx - 1].astype(int)),
+                     tuple(trayectorias['kalman'][good_contours - 1].astype(int)),
                      tuple(estimacion_kf.astype(int)),
                      (0, 255, 0), 2)
 
             # Partículas
             cv2.line(img_color,
-                     tuple(trayectorias['particulas'][idx - 1].astype(int)),
+                     tuple(trayectorias['particulas'][good_contours - 1].astype(int)),
                      tuple(estimacion_pf.astype(int)),
                      (255, 0, 255), 2)
 
             # Mediciones (si hay consecutivas)
-            if trayectorias['mediciones'][idx - 1] is not None and medicion is not None:
+            if trayectorias['mediciones'][good_contours - 1] is not None and medicion is not None:
+                print("1", tuple(trayectorias['mediciones'][good_contours - 1].astype(int)))
+                print("2", tuple(medicion.astype(int)))
+
                 cv2.line(img_color,
-                         tuple(trayectorias['mediciones'][idx - 1].astype(int)),
+                         tuple(trayectorias['mediciones'][good_contours - 1].astype(int)),
                          tuple(medicion.astype(int)),
                          (0, 0, 255), 1)
 
@@ -165,13 +172,26 @@ def graficar_resultados(trayectorias, output):
     plt.grid(True)
     plt.savefig(output)
 
-def extraer_frames(video_path):
+def extraer_frames(video_path, reduce_dim=4, reduce_fps=3, n_frames=20*30):
+    # reduce fps takes one frame per $(reduce_fps)
     cap = cv2.VideoCapture(video_path)
     frames = []
+    
+    i = 0 
+    
     success, frame = cap.read()
+    dim = frame[0].shape[0] // reduce_dim
+    i+=1
     while success:
-        frames.append(frame)
+        if i % reduce_fps == 0:
+            if reduce_dim != 1:
+                frame = cv2.resize(frame, (dim, dim))
+            frames.append(frame)
+
+        if i == n_frames:
+            break
         success, frame = cap.read()
+        i+=1
     cap.release()
     return frames
 
@@ -195,10 +215,11 @@ if __name__ == "__main__":
     path_bs = "dataset/bs/Walking.54138969.mp4"
     path_output = "dataset/output/Walking.54138969"
 
-    video = extraer_frames(path_video)
+    reduce_dim = 4
+    video = extraer_frames(path_video, reduce_dim=reduce_dim, reduce_fps=3, n_frames=20*30)
 
     # Uso de background subtraction ground truth
-    frames = extraer_frames(path_bs)
+    frames = extraer_frames(path_bs, reduce_dim=reduce_dim, reduce_fps=3, n_frames=20*30)
     frames = [cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) for frame in frames]
     result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
                                              use_vel=True, use_accel=False,
@@ -216,39 +237,39 @@ if __name__ == "__main__":
     guardar_video(result, path_output + "_Mean.mp4", fps=60)
     graficar_resultados(trayectorias, path_output + "_Mean.png")
 
-    # Uso de background subtraction por moda
-    frames = background_subtraction_mode(video)
-    result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
-                                             use_vel=True, use_accel=False,
-                                             resample='pr', particulas=100)
+    # # Uso de background subtraction por moda
+    # frames = background_subtraction_mode(video)
+    # result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
+    #                                          use_vel=True, use_accel=False,
+    #                                          resample='pr', particulas=100)
 
-    guardar_video(result, path_output + "_Mode.mp4", fps=60)
-    graficar_resultados(trayectorias, path_output + "_Mode.png")
+    # guardar_video(result, path_output + "_Mode.mp4", fps=60)
+    # graficar_resultados(trayectorias, path_output + "_Mode.png")
 
-    # Uso de background subtraction por moda
-    frames = background_subtraction_exponential_moving_average(video)
-    result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
-                                             use_vel=True, use_accel=False,
-                                             resample='pr', particulas=100)
+    # # Uso de background subtraction por moda
+    # frames = background_subtraction_exponential_moving_average(video)
+    # result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
+    #                                          use_vel=True, use_accel=False,
+    #                                          resample='pr', particulas=100)
 
-    guardar_video(result, path_output + "_AVGMove.mp4", fps=60)
-    graficar_resultados(trayectorias, path_output + "_AVGMove.png")
+    # guardar_video(result, path_output + "_AVGMove.mp4", fps=60)
+    # graficar_resultados(trayectorias, path_output + "_AVGMove.png")
     
-    # Uso de background subtraction por moda
-    frames = background_subtraction_exponential_moving_average_consider_bg(video)
-    result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
-                                             use_vel=True, use_accel=False,
-                                             resample='pr', particulas=100)
+    # # Uso de background subtraction por moda
+    # frames = background_subtraction_exponential_moving_average_consider_bg(video)
+    # result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
+    #                                          use_vel=True, use_accel=False,
+    #                                          resample='pr', particulas=100)
 
-    guardar_video(result, path_output + "_AVGMoveBG.mp4", fps=60)
-    graficar_resultados(trayectorias, path_output + "_AVGMoveBG.png")
+    # guardar_video(result, path_output + "_AVGMoveBG.mp4", fps=60)
+    # graficar_resultados(trayectorias, path_output + "_AVGMoveBG.png")
 
-    # Uso de background subtraction por moda
-    frames = background_subtraction_gaussian_moving_average(video)
-    result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
-                                             use_vel=True, use_accel=False,
-                                             resample='pr', particulas=100)
+    # # Uso de background subtraction por moda
+    # frames = background_subtraction_gaussian_moving_average(video)
+    # result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
+    #                                          use_vel=True, use_accel=False,
+    #                                          resample='pr', particulas=100)
 
-    guardar_video(result, path_output + "_Gauss.mp4", fps=60)
-    graficar_resultados(trayectorias, path_output + "_Gauss.png")
+    # guardar_video(result, path_output + "_Gauss.mp4", fps=60)
+    # graficar_resultados(trayectorias, path_output + "_Gauss.png")
     
