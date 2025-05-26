@@ -22,7 +22,7 @@ def detectar_objeto(img_binaria):
     return None
 
 
-def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
+def procesar_secuencia(video, bs, gt, dt, use_vel, use_accel, resample, particulas):
     result = []
 
     # Inicializar filtros
@@ -53,7 +53,8 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
         'mediciones': [],
         'kalman': [],
         'particulas': [],
-        'enjambre': []
+        'enjambre': [],
+        'ground_truth': []
     }
 
     last_position_pf = None
@@ -61,9 +62,10 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
 
     good_contours = -1
 
-    for idx, frame in enumerate(bs):
+    for idx, (frame, gt_frame) in enumerate(zip(bs, gt)):
         # 1. Detección del objeto
         medicion = detectar_objeto(frame)
+        gt_pos = detectar_objeto(gt_frame)
         if medicion is None:
             continue
         good_contours+=1
@@ -123,6 +125,9 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
         trayectorias['kalman'].append(estimacion_kf.copy())
         trayectorias['particulas'].append(np.array(estimacion_pf).copy())
         trayectorias['enjambre'].append(np.array(estimacion_swarm).copy())
+        trayectorias['ground_truth'].append(
+            gt_pos.copy() if gt_pos is not None else np.array([np.nan, np.nan])
+        )
 
         # 5. Visualización
         img_color = video[idx].copy()
@@ -141,9 +146,11 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
         # Dibujar elementos
         if medicion is not None:
             cv2.circle(img_color, tuple(medicion.astype(int)), 5, (0, 0, 255), -1)  # Medicion (rojo)
+        if gt_pos is not None:
+            cv2.circle(img_color, tuple(gt_pos.astype(int)), 5, (0, 255, 255), -1)  # Ground truth (amarillo)
         cv2.circle(img_color, tuple(estimacion_kf.astype(int)), 5, (0, 255, 0), -1)  # Kalman (verde)
         cv2.circle(img_color, tuple(estimacion_pf.astype(int).tolist()), 5, (255, 0, 255), -1) # Partículas (magenta)
-        cv2.circle(img_color, tuple(estimacion_swarm.astype(int).tolist()), 5, (0, 255, 0), -1) # Swarm (magenta)
+        cv2.circle(img_color, tuple(estimacion_swarm.astype(int).tolist()), 5, (255, 0, 0), -1) # Swarm (azul)
 
         # Dibujar trayectorias
         if good_contours > 0:
@@ -162,7 +169,14 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
             cv2.line(img_color,
                      tuple(trayectorias['enjambre'][good_contours - 1].astype(int)),
                      tuple(estimacion_swarm.astype(int)),
-                     (0, 255, 0), 2)
+                     (255, 0, 0), 2)
+
+            # Ground truth
+            if not np.isnan(trayectorias['ground_truth'][good_contours - 1][0]) and gt_pos is not None:
+                cv2.line(img_color,
+                         tuple(trayectorias['ground_truth'][good_contours - 1].astype(int)),
+                         tuple(gt_pos.astype(int)),
+                         (0, 255, 255), 1)
 
             # Mediciones (si hay consecutivas)
             if trayectorias['mediciones'][good_contours - 1] is not None and medicion is not None:
@@ -176,7 +190,8 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
         cv2.putText(img_color, "Medicion", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
         cv2.putText(img_color, "Kalman", (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         cv2.putText(img_color, "Particulas", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
-        cv2.putText(img_color, "Enjambre", (10, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        cv2.putText(img_color, "Enjambre", (10, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+        cv2.putText(img_color, "Ground Truth", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
         result.append(img_color)
 
@@ -185,22 +200,28 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
 
 def graficar_resultados(trayectorias, output_base):
     # Función auxiliar para guardar en dos archivos
-    def guardar_grafica(x_data, y_data, titulo, eje_y, output):
+    def guardar_grafica(x_data, titulo, eje_y, output):
         plt.figure(figsize=(15, 8))
         time = range(len(x_data['mediciones']))
 
-        # Mediciones (puntos rojos solo donde hay datos)
+        # Ground Truth
+        gt_valid = [(t, x) for t, x in enumerate(x_data['ground_truth']) if not np.isnan(x)]
+        if gt_valid:
+            t_gt, x_gt = zip(*gt_valid)
+            plt.plot(t_gt, x_gt, 'y-', label='Ground Truth', markersize=4)
+
+        # Mediciones
         med_valid = [(t, x) for t, x in enumerate(x_data['mediciones']) if not np.isnan(x)]
         if med_valid:
             t_med, x_med = zip(*med_valid)
             plt.plot(t_med, x_med, 'ro', label='Mediciones', markersize=4)
 
         # Kalman (línea continua)
-        plt.plot(time, x_data['kalman'], 'g-', linewidth=2, label='Filtro de Kalman')
+        plt.plot(time, x_data['kalman'], 'g--', linewidth=2, label='Filtro de Kalman')
 
         # Partículas (línea discontinua)
         plt.plot(time, x_data['particulas'], 'm--', linewidth=2, label='Filtro de Partículas')
-        # Partículas (línea discontinua)
+        # enjambre (línea discontinua)
         plt.plot(time, x_data['enjambre'], 'b--', linewidth=2, label='Enjambre')
 
         plt.title(titulo)
@@ -216,7 +237,8 @@ def graficar_resultados(trayectorias, output_base):
         'mediciones': [m[0] if not np.isnan(m[0]) else np.nan for m in trayectorias['mediciones']],
         'kalman': [k[0] for k in trayectorias['kalman']],
         'particulas': [p[0] for p in trayectorias['particulas']],
-        'enjambre': [p[0] for p in trayectorias['enjambre']]
+        'enjambre': [p[0] for p in trayectorias['enjambre']],
+        'ground_truth': [gt[0] if not np.isnan(gt[0]) else np.nan for gt in trayectorias['ground_truth']]
     }
 
     # Preparar datos para eje Y
@@ -224,16 +246,17 @@ def graficar_resultados(trayectorias, output_base):
         'mediciones': [m[1] if not np.isnan(m[1]) else np.nan for m in trayectorias['mediciones']],
         'kalman': [k[1] for k in trayectorias['kalman']],
         'particulas': [p[1] for p in trayectorias['particulas']],
-        'enjambre': [p[0] for p in trayectorias['enjambre']]
+        'enjambre': [p[0] for p in trayectorias['enjambre']],
+        'ground_truth': [gt[1] if not np.isnan(gt[1]) else np.nan for gt in trayectorias['ground_truth']]
     }
 
     # Generar y guardar gráficas
-    guardar_grafica(datos_x, datos_y,
+    guardar_grafica(datos_x,
                     'Evolución Temporal de la Coordenada X',
                     'X (pixels)',
                     f"{output_base}_x.png")
 
-    guardar_grafica(datos_y, datos_x,  # Intercambiamos datos para el eje Y
+    guardar_grafica(datos_y,  # Intercambiamos datos para el eje Y
                     'Evolución Temporal de la Coordenada Y',
                     'Y (pixels)',
                     f"{output_base}_y.png")
@@ -286,9 +309,9 @@ if __name__ == "__main__":
     video = extraer_frames(path_video, reduce_dim=reduce_dim, reduce_fps=3, n_frames=20*30)
 
     # # Uso de background subtraction ground truth
-    frames = extraer_frames(path_bs, reduce_dim=reduce_dim, reduce_fps=3, n_frames=20*30)
-    frames = [cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) for frame in frames]
-    result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
+    frames_gt = extraer_frames(path_bs, reduce_dim=reduce_dim, reduce_fps=3, n_frames=20*30)
+    frames_gt = [cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) for frame in frames_gt]
+    result, trayectorias = procesar_secuencia(video, frames_gt, frames_gt, dt=0.1,
                                              use_vel=True, use_accel=False,
                                              resample='pr', particulas=400)
 
@@ -298,7 +321,7 @@ if __name__ == "__main__":
     # # Uso de background subtraction por media
     frames = background_subtraction_mean(video)
     guardar_video(frames, "BS_" + path_output + "_Mean.mp4", fps=60)
-    result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
+    result, trayectorias = procesar_secuencia(video, frames, frames_gt, dt=0.1,
                                              use_vel=True, use_accel=False,
                                              resample='pr', particulas=100)
 
@@ -307,7 +330,7 @@ if __name__ == "__main__":
 
     # Uso de background subtraction por moda
     frames = background_subtraction_exponential_moving_average(video)
-    result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
+    result, trayectorias = procesar_secuencia(video, frames, frames_gt, dt=0.1,
                                              use_vel=True, use_accel=False,
                                              resample='pr', particulas=100)
 
@@ -316,7 +339,7 @@ if __name__ == "__main__":
     
     # # Uso de background subtraction por moda
     frames = background_subtraction_exponential_moving_average_consider_bg(video)
-    result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
+    result, trayectorias = procesar_secuencia(video, frames, frames_gt, dt=0.1,
                                              use_vel=True, use_accel=False,
                                              resample='pr', particulas=100)
 
@@ -325,7 +348,7 @@ if __name__ == "__main__":
 
     # Uso de background subtraction por moda
     frames = background_subtraction_gaussian_moving_average(video)
-    result, trayectorias = procesar_secuencia(video, frames, dt=0.1,
+    result, trayectorias = procesar_secuencia(video, frames, frames_gt, dt=0.1,
                                              use_vel=True, use_accel=False,
                                              resample='pr', particulas=100)
 
