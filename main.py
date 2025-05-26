@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 
 from followMethods import Kalman, PF, Swarm
 from subtractionMethods import *
+from ultralytics import YOLO
 
 
 def detectar_objeto(img_binaria):
@@ -48,12 +49,16 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
         resample=resample
     )
 
+    # Cargar modelo YOLOv8 preentrenado
+    model = YOLO('yolov8n.pt')  # Puedes usar yolov8n.pt, yolov8s.pt, etc.
+
     # Variables para seguimiento
     trayectorias = {
         'mediciones': [],
         'kalman': [],
         'particulas': [],
-        'enjambre': []
+        'enjambre': [],
+        'yolo': []
     }
 
     last_position_pf = None
@@ -116,6 +121,27 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
 
         last_position_swarm = estimacion_swarm.copy()
 
+        # 4. Actualizar Yolo
+        results_bbox = model(video[idx], verbose=False)
+        max_conf = 0
+        best_box = None
+        for result_bbox in results_bbox:
+            boxes = result_bbox.boxes
+            for box in boxes:
+                cls_id = int(box.cls[0])
+                conf = float(box.conf[0])
+                if result_bbox.names[cls_id] == 'person' and conf > max_conf:
+                    max_conf = conf
+                    best_box = box
+
+        # Si se encontró una persona
+        estimacion_yolo = None
+        if best_box is not None:
+            x1, y1, x2, y2 = best_box.xyxy[0].tolist()
+            cx = int((x1 + x2) / 2)
+            cy = int((y1 + y2) / 2)
+            estimacion_yolo = np.array([cx,cy])
+
         # 4. Almacenar resultados
         trayectorias['mediciones'].append(
             medicion.copy() if medicion is not None else np.array([np.nan, np.nan])
@@ -123,6 +149,8 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
         trayectorias['kalman'].append(estimacion_kf.copy())
         trayectorias['particulas'].append(np.array(estimacion_pf).copy())
         trayectorias['enjambre'].append(np.array(estimacion_swarm).copy())
+        trayectorias['yolo'].append(np.array(estimacion_yolo).copy())
+
 
         # 5. Visualización
         img_color = video[idx].copy()
@@ -143,7 +171,8 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
             cv2.circle(img_color, tuple(medicion.astype(int)), 5, (0, 0, 255), -1)  # Medicion (rojo)
         cv2.circle(img_color, tuple(estimacion_kf.astype(int)), 5, (0, 255, 0), -1)  # Kalman (verde)
         cv2.circle(img_color, tuple(estimacion_pf.astype(int).tolist()), 5, (255, 0, 255), -1) # Partículas (magenta)
-        cv2.circle(img_color, tuple(estimacion_swarm.astype(int).tolist()), 5, (0, 255, 0), -1) # Swarm (magenta)
+        cv2.circle(img_color, tuple(estimacion_swarm.astype(int).tolist()), 5, (0, 255, 0), -1) # Swarm (azul)
+        cv2.circle(img_color, tuple(estimacion_yolo.astype(int).tolist()), 5, (125, 125, 0), -1) # Yolo (amarillo)
 
         # Dibujar trayectorias
         if good_contours > 0:
@@ -163,6 +192,11 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
                      tuple(trayectorias['enjambre'][good_contours - 1].astype(int)),
                      tuple(estimacion_swarm.astype(int)),
                      (0, 255, 0), 2)
+            
+            cv2.line(img_color,
+                     tuple(trayectorias['yolo'][good_contours - 1].astype(int)),
+                     tuple(estimacion_yolo.astype(int)),
+                     (125, 125, 0), 2)
 
             # Mediciones (si hay consecutivas)
             if trayectorias['mediciones'][good_contours - 1] is not None and medicion is not None:
@@ -177,6 +211,8 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
         cv2.putText(img_color, "Kalman", (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         cv2.putText(img_color, "Particulas", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
         cv2.putText(img_color, "Enjambre", (10, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        cv2.putText(img_color, "Yolo", (10, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (125, 125, 0), 2)
+
 
         result.append(img_color)
 
@@ -202,6 +238,8 @@ def graficar_resultados(trayectorias, output_base):
         plt.plot(time, x_data['particulas'], 'm--', linewidth=2, label='Filtro de Partículas')
         # Partículas (línea discontinua)
         plt.plot(time, x_data['enjambre'], 'b--', linewidth=2, label='Enjambre')
+        plt.plot(time, x_data['yolo'], 'y--', linewidth=2, label='Yolo')
+
 
         plt.title(titulo)
         plt.xlabel('Tiempo (frames)')
@@ -216,7 +254,8 @@ def graficar_resultados(trayectorias, output_base):
         'mediciones': [m[0] if not np.isnan(m[0]) else np.nan for m in trayectorias['mediciones']],
         'kalman': [k[0] for k in trayectorias['kalman']],
         'particulas': [p[0] for p in trayectorias['particulas']],
-        'enjambre': [p[0] for p in trayectorias['enjambre']]
+        'enjambre': [p[0] for p in trayectorias['enjambre']],
+        'yolo': [p[0] for p in trayectorias['yolo']]
     }
 
     # Preparar datos para eje Y
@@ -224,7 +263,8 @@ def graficar_resultados(trayectorias, output_base):
         'mediciones': [m[1] if not np.isnan(m[1]) else np.nan for m in trayectorias['mediciones']],
         'kalman': [k[1] for k in trayectorias['kalman']],
         'particulas': [p[1] for p in trayectorias['particulas']],
-        'enjambre': [p[0] for p in trayectorias['enjambre']]
+        'enjambre': [p[1] for p in trayectorias['enjambre']],
+        'yolo': [p[1] for p in trayectorias['yolo']]
     }
 
     # Generar y guardar gráficas
