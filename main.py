@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 
-from followMethods import Kalman, PF
+from followMethods import Kalman, PF, Swarm
 from subtractionMethods import *
 
 
@@ -38,14 +38,27 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
         resample=resample
     )
 
+    swarm = Swarm(
+        roi_size=40,
+        img=bs[0],
+        n_particles=particulas,
+        video=bs,  # Pasar toda la secuencia binaria
+        use_vel=use_vel,
+        use_accel=use_accel,
+        resample=resample
+    )
+
     # Variables para seguimiento
     trayectorias = {
         'mediciones': [],
         'kalman': [],
-        'particulas': []
+        'particulas': [],
+        'enjambre': []
     }
 
-    last_position = None
+    last_position_pf = None
+    last_position_swarm = None
+
     good_contours = -1
 
     for idx, frame in enumerate(bs):
@@ -66,22 +79,42 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
         # 3. Actualizar Particle Filter
         if good_contours == 0:
             if medicion is not None:
-                last_position = medicion.copy()
+                last_position_pf = medicion.copy()
             else:
-                last_position = np.zeros(2)
-            estimacion_pf = last_position.copy()
+                last_position_pf = np.zeros(2)
+            estimacion_pf = last_position_pf.copy()
         else:
             pf.img = frame  # Actualizar frame actual en el PF
             pf.run(steps=1)
             estimacion_pf = pf.get_smoothed_estimate()
 
             # Actualización adaptativa del ROI
-            if np.linalg.norm(estimacion_pf - last_position) > 10:
+            if np.linalg.norm(estimacion_pf - last_position_pf) > 10:
                 pf.roi_size = min(60, pf.roi_size + 10)
             else:
                 pf.roi_size = max(30, pf.roi_size - 5)
 
-        last_position = estimacion_pf.copy()
+        last_position_pf = estimacion_pf.copy()
+
+        # 4. Actualizar Swarm
+        if good_contours == 0:
+            if medicion is not None:
+                last_position_swarm = medicion.copy()
+            else:
+                last_position_swarm = np.zeros(2)
+            estimacion_swarm = last_position_swarm.copy()
+        else:
+            swarm.img = frame  # Actualizar frame actual en el PF
+            swarm.run(steps=1)
+            estimacion_swarm = swarm.get_smoothed_estimate()
+
+            # Actualización adaptativa del ROI
+            if np.linalg.norm(estimacion_swarm - last_position_swarm) > 10:
+                swarm.roi_size = min(60, swarm.roi_size + 10)
+            else:
+                swarm.roi_size = max(30, swarm.roi_size - 5)
+
+        last_position_swarm = estimacion_swarm.copy()
 
         # 4. Almacenar resultados
         trayectorias['mediciones'].append(
@@ -89,6 +122,7 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
         )
         trayectorias['kalman'].append(estimacion_kf.copy())
         trayectorias['particulas'].append(np.array(estimacion_pf).copy())
+        trayectorias['enjambre'].append(np.array(estimacion_swarm).copy())
 
         # 5. Visualización
         img_color = video[idx].copy()
@@ -109,6 +143,7 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
             cv2.circle(img_color, tuple(medicion.astype(int)), 5, (0, 0, 255), -1)  # Medicion (rojo)
         cv2.circle(img_color, tuple(estimacion_kf.astype(int)), 5, (0, 255, 0), -1)  # Kalman (verde)
         cv2.circle(img_color, tuple(estimacion_pf.astype(int).tolist()), 5, (255, 0, 255), -1) # Partículas (magenta)
+        cv2.circle(img_color, tuple(estimacion_swarm.astype(int).tolist()), 5, (0, 255, 0), -1) # Swarm (magenta)
 
         # Dibujar trayectorias
         if good_contours > 0:
@@ -123,6 +158,11 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
                      tuple(trayectorias['particulas'][good_contours - 1].astype(int)),
                      tuple(estimacion_pf.astype(int)),
                      (255, 0, 255), 2)
+            
+            cv2.line(img_color,
+                     tuple(trayectorias['enjambre'][good_contours - 1].astype(int)),
+                     tuple(estimacion_swarm.astype(int)),
+                     (0, 255, 0), 2)
 
             # Mediciones (si hay consecutivas)
             if trayectorias['mediciones'][good_contours - 1] is not None and medicion is not None:
@@ -136,6 +176,7 @@ def procesar_secuencia(video, bs, dt, use_vel, use_accel, resample, particulas):
         cv2.putText(img_color, "Medicion", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
         cv2.putText(img_color, "Kalman", (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         cv2.putText(img_color, "Particulas", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
+        cv2.putText(img_color, "Enjambre", (10, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
         result.append(img_color)
 
@@ -159,6 +200,8 @@ def graficar_resultados(trayectorias, output_base):
 
         # Partículas (línea discontinua)
         plt.plot(time, x_data['particulas'], 'm--', linewidth=2, label='Filtro de Partículas')
+        # Partículas (línea discontinua)
+        plt.plot(time, x_data['enjambre'], 'b--', linewidth=2, label='Enjambre')
 
         plt.title(titulo)
         plt.xlabel('Tiempo (frames)')
@@ -172,14 +215,16 @@ def graficar_resultados(trayectorias, output_base):
     datos_x = {
         'mediciones': [m[0] if not np.isnan(m[0]) else np.nan for m in trayectorias['mediciones']],
         'kalman': [k[0] for k in trayectorias['kalman']],
-        'particulas': [p[0] for p in trayectorias['particulas']]
+        'particulas': [p[0] for p in trayectorias['particulas']],
+        'enjambre': [p[0] for p in trayectorias['enjambre']]
     }
 
     # Preparar datos para eje Y
     datos_y = {
         'mediciones': [m[1] if not np.isnan(m[1]) else np.nan for m in trayectorias['mediciones']],
         'kalman': [k[1] for k in trayectorias['kalman']],
-        'particulas': [p[1] for p in trayectorias['particulas']]
+        'particulas': [p[1] for p in trayectorias['particulas']],
+        'enjambre': [p[0] for p in trayectorias['enjambre']]
     }
 
     # Generar y guardar gráficas
